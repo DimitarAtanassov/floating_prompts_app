@@ -1,64 +1,27 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { 
   Box, 
   Search, 
-  Filter, 
   Clock, 
   CheckCircle2, 
   XCircle,
   Play,
   Eye,
-  MoreVertical,
-  Tag
+  Tag,
+  FileText,
+  Cpu,
+  Copy,
+  Check
 } from 'lucide-react';
-import { Card, Button, Badge, EmptyState } from '../components/ui';
-
-// Mock data - will be replaced with API
-const MOCK_PROMPTS = [
-  {
-    id: '1',
-    display_name: 'Article Summarizer - Production',
-    template_name: 'summarizer',
-    template_version: 2,
-    environment: 'production',
-    is_active: true,
-    category: 'summarization',
-    created_at: '2026-01-10T12:00:00Z',
-    response_count: 156,
-    success_rate: 98.2,
-  },
-  {
-    id: '2',
-    display_name: 'Code Review Assistant',
-    template_name: 'code-reviewer',
-    template_version: 1,
-    environment: 'staging',
-    is_active: true,
-    category: 'development',
-    created_at: '2026-01-09T15:30:00Z',
-    response_count: 42,
-    success_rate: 95.0,
-  },
-  {
-    id: '3',
-    display_name: 'Email Composer',
-    template_name: 'email-writer',
-    template_version: 3,
-    environment: 'development',
-    is_active: false,
-    category: 'generation',
-    created_at: '2026-01-08T09:00:00Z',
-    response_count: 8,
-    success_rate: 100,
-  },
-];
+import { Card, Button, Badge, EmptyState, Modal } from '../components/ui';
+import { MOCK_PROMPTS, type MockPrompt } from '../api/mockData';
 
 const environments = ['all', 'production', 'staging', 'development'];
 
 export function Prompts() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEnv, setSelectedEnv] = useState('all');
+  const [selectedPrompt, setSelectedPrompt] = useState<MockPrompt | null>(null);
 
   const filteredPrompts = MOCK_PROMPTS.filter(p => {
     const matchesSearch = p.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -130,15 +93,26 @@ export function Prompts() {
       ) : (
         <div className="grid gap-4">
           {filteredPrompts.map((prompt) => (
-            <PromptCard key={prompt.id} prompt={prompt} />
+            <PromptCard 
+              key={prompt.id} 
+              prompt={prompt} 
+              onView={() => setSelectedPrompt(prompt)}
+            />
           ))}
         </div>
       )}
+
+      {/* View Prompt Modal */}
+      <PromptViewModal 
+        prompt={selectedPrompt}
+        isOpen={!!selectedPrompt}
+        onClose={() => setSelectedPrompt(null)}
+      />
     </div>
   );
 }
 
-function PromptCard({ prompt }: { prompt: typeof MOCK_PROMPTS[0] }) {
+function PromptCard({ prompt, onView }: { prompt: MockPrompt; onView: () => void }) {
   const envColors = {
     production: 'bg-emerald-100 text-emerald-700',
     staging: 'bg-amber-100 text-amber-700',
@@ -149,6 +123,9 @@ function PromptCard({ prompt }: { prompt: typeof MOCK_PROMPTS[0] }) {
     month: 'short',
     day: 'numeric',
   });
+
+  // Extract placeholders from user_prompt
+  const placeholders = prompt.user_prompt.match(/\{(\w+)\}/g) || [];
 
   return (
     <Card hover>
@@ -182,15 +159,24 @@ function PromptCard({ prompt }: { prompt: typeof MOCK_PROMPTS[0] }) {
               )}
             </div>
             
-            <div className="flex items-center gap-4 text-sm text-sky-600 mt-2">
+            <div className="flex items-center gap-4 text-sm text-sky-600 mt-2 flex-wrap">
               <span className="flex items-center gap-1">
                 <Tag className="w-4 h-4" />
                 {prompt.template_name} v{prompt.template_version}
               </span>
               <span className="flex items-center gap-1">
+                <Cpu className="w-4 h-4" />
+                {prompt.llm_model}
+              </span>
+              <span className="flex items-center gap-1">
                 <Clock className="w-4 h-4" />
                 {formattedDate}
               </span>
+              {placeholders.length > 0 && (
+                <span className="text-sky-400">
+                  {placeholders.length} variable{placeholders.length > 1 ? 's' : ''}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -208,7 +194,7 @@ function PromptCard({ prompt }: { prompt: typeof MOCK_PROMPTS[0] }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" icon={<Eye className="w-4 h-4" />}>
+          <Button variant="ghost" size="sm" icon={<Eye className="w-4 h-4" />} onClick={onView}>
             View
           </Button>
           <Button variant="ghost" size="sm" icon={<Play className="w-4 h-4" />}>
@@ -217,5 +203,170 @@ function PromptCard({ prompt }: { prompt: typeof MOCK_PROMPTS[0] }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+interface PromptViewModalProps {
+  prompt: MockPrompt | null;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+function PromptViewModal({ prompt, isOpen, onClose }: PromptViewModalProps) {
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  if (!prompt) return null;
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const placeholders = prompt.user_prompt.match(/\{(\w+)\}/g) || [];
+  const hasVariables = placeholders.length > 0;
+
+  const envColors = {
+    production: 'bg-emerald-100 text-emerald-700',
+    staging: 'bg-amber-100 text-amber-700',
+    development: 'bg-sky-100 text-sky-700',
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Prompt Details" size="xl">
+      <div className="space-y-6">
+        {/* Header Info */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-sky-900">{prompt.display_name}</h3>
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <Badge variant="info" size="sm">
+                <FileText className="w-3 h-3 mr-1" />
+                {prompt.template_name} v{prompt.template_version}
+              </Badge>
+              <Badge variant="default" size="sm">
+                <Cpu className="w-3 h-3 mr-1" />
+                {prompt.llm_provider} / {prompt.llm_model}
+              </Badge>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${envColors[prompt.environment as keyof typeof envColors]}`}>
+                {prompt.environment}
+              </span>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-bold text-sky-900">{prompt.success_rate}%</p>
+            <p className="text-xs text-sky-500">{prompt.response_count} responses</p>
+          </div>
+        </div>
+
+        {/* System Prompt */}
+        {prompt.system_prompt && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-sky-700">System Prompt</label>
+              <button
+                onClick={() => copyToClipboard(prompt.system_prompt!, 'system')}
+                className="text-sky-400 hover:text-sky-600 p-1 rounded transition-colors"
+              >
+                {copiedField === 'system' ? (
+                  <Check className="w-4 h-4 text-emerald-500" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            <pre className="text-sm text-sky-800 bg-sky-50 rounded-xl p-4 whitespace-pre-wrap border border-sky-100">
+              {prompt.system_prompt}
+            </pre>
+          </div>
+        )}
+
+        {/* User Prompt Template (if has variables) */}
+        {hasVariables && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-sky-700">
+                User Prompt Template
+                <span className="ml-2 text-xs text-sky-400">
+                  ({placeholders.length} variable{placeholders.length > 1 ? 's' : ''})
+                </span>
+              </label>
+              <button
+                onClick={() => copyToClipboard(prompt.user_prompt, 'template')}
+                className="text-sky-400 hover:text-sky-600 p-1 rounded transition-colors"
+              >
+                {copiedField === 'template' ? (
+                  <Check className="w-4 h-4 text-emerald-500" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            <pre className="text-sm text-sky-800 bg-amber-50 rounded-xl p-4 whitespace-pre-wrap border border-amber-200">
+              {prompt.user_prompt.split(/(\{[^}]+\})/).map((part, i) => 
+                part.match(/^\{[^}]+\}$/) ? (
+                  <span key={i} className="bg-amber-200 text-amber-800 px-1 rounded font-medium">
+                    {part}
+                  </span>
+                ) : (
+                  <span key={i}>{part}</span>
+                )
+              )}
+            </pre>
+          </div>
+        )}
+
+        {/* Input Values (if has variables) */}
+        {hasVariables && prompt.input_values && (
+          <div>
+            <label className="text-sm font-medium text-sky-700 block mb-2">Input Values</label>
+            <div className="bg-sky-50 rounded-xl p-4 border border-sky-100">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {Object.entries(prompt.input_values).map(([key, value]) => (
+                  <div key={key} className="flex flex-col">
+                    <span className="text-xs font-medium text-sky-500 mb-1">{key}</span>
+                    <span className="text-sm text-sky-800 bg-white px-3 py-2 rounded-lg border border-sky-200 truncate">
+                      {value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rendered User Prompt */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium text-sky-700">
+              {hasVariables ? 'Rendered User Prompt' : 'User Prompt'}
+            </label>
+            <button
+              onClick={() => copyToClipboard(prompt.rendered_user_prompt, 'rendered')}
+              className="text-sky-400 hover:text-sky-600 p-1 rounded transition-colors"
+            >
+              {copiedField === 'rendered' ? (
+                <Check className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+          <pre className="text-sm text-sky-800 bg-emerald-50 rounded-xl p-4 whitespace-pre-wrap border border-emerald-200">
+            {prompt.rendered_user_prompt}
+          </pre>
+        </div>
+
+        {/* Actions */}
+        <div className="flex justify-end gap-3 pt-4 border-t border-sky-100">
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+          <Button icon={<Play className="w-4 h-4" />}>
+            Test in Playground
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
